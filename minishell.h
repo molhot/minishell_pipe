@@ -24,6 +24,8 @@
 #include <assert.h>
 #include <readline/readline.h>
 #include <readline/history.h>
+#include <errno.h>
+
 
 /**** token *****/
 
@@ -81,6 +83,8 @@ typedef struct s_command
 {
 	t_token		 	*args;
 	t_redirect		**redirect;
+	int				in_fd[2];
+	int				out_fd[2];
 	int				now_in;
 	int				now_out;
 }	t_command;
@@ -96,7 +100,7 @@ int     interpret(t_command *command);
 size_t	ft_strlcat(char *dst, const char *src, size_t dstsize);
 size_t	ft_strlcpy(char *dst, const char *src, size_t size);
 char	**ft_split(char const *s, char c);
-int	    exec(t_command *command);
+int exec(t_node *node);
 int     abusolute_path(char *line);
 bool    is_metacharactert(char c);
 void    expand(t_token *tok);
@@ -105,7 +109,13 @@ void	free_token(t_token *head);
 
 void    fatal_error(const char *msg) __attribute__((noreturn));
 
+void	prepare_pipe(t_node *node);
+void	prepare_pipe_child(t_node *node);
+void	prepare_pipe_parent(t_node *node);
+pid_t	exec_pipeline(t_node *node);
+
 
 t_node	*parse(t_token *tok);
+void cpy_pipe(int dst[2], int src[2]);
 
 #endif

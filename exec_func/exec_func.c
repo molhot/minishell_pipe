@@ -161,23 +161,29 @@ int abusolute_path(char *line)
     }
 }
 
-void ready_redirectionfile(t_redirect *redirect)
+void ready_redirectionfile(t_node *node)
 {
-    int     fd;
+    int         fd;
+    t_redirect  *redirect;
 
-    while (redirect != NULL)
+    while (node != NULL)
     {
-        if (redirect->type == IN)
-            fd = open(redirect->file_path, O_RDONLY);
-        if (redirect->type == HEREDOC)
-            fd = heredoc(redirect->file_path);
-        if (redirect->type == OUT)
-            fd = open(redirect->file_path, O_WRONLY | O_CREAT | O_TRUNC);
-        if (redirect->type == APPEND)
-            fd = open(redirect->file_path, O_CREAT | O_WRONLY | O_APPEND);
-        redirect->redirectfile = fd;
-        //redirect->redirectfile = stashfd(fd);
-        redirect = redirect->next;
+        redirect = *(node->command->redirect);
+        while (redirect != NULL)
+        {
+            if (redirect->type == IN)
+                fd = open(redirect->file_path, O_RDONLY);
+            if (redirect->type == HEREDOC)
+                fd = heredoc(redirect->file_path);
+            if (redirect->type == OUT)
+                fd = open(redirect->file_path, O_WRONLY | O_CREAT | O_TRUNC);
+            if (redirect->type == APPEND)
+                fd = open(redirect->file_path, O_CREAT | O_WRONLY | O_APPEND);
+            redirect->redirectfile = fd;
+            //redirect->redirectfile = stashfd(fd);
+            redirect = redirect->next;
+        }
+        node = node->next;
     }
 }
 
@@ -190,53 +196,144 @@ void    redirect_reconect(t_command *command)
     {
         if (redirect->type == IN || redirect->type == HEREDOC)
         {
-            close(0);
             dup2(redirect->redirectfile, 0);
-            //close(redirect->redirectfile);
+            close(redirect->redirectfile);
             command->now_in = redirect->redirectfile;
         }
         if (redirect->type == OUT || redirect->type == APPEND)
         {
-            close(1);
             dup2(redirect->redirectfile, 1);
-            //close(redirect->redirectfile);
+            close(redirect->redirectfile);
             command->now_out = redirect->redirectfile;
         }
         redirect = redirect->next;
     }
 }
 
-int    exec(t_command *command)
+void	cpy_pipe(int dst[2], int src[2])
 {
-    t_redirect *f_redirect;
-    pid_t pid;
-    int wstatus;
-    char **argv;
-    char *command_name;
-    extern char **environ;
+	dst[0] = src[0];
+	dst[1] = src[1];
+}
 
-    f_redirect = *(command->redirect);
-    ready_redirectionfile(*(command->redirect));
-    *(command->redirect) = f_redirect;
+void	prepare_pipe(t_node *node)
+{
+	if (node->next == NULL)//実行が一つ
+		return ;
+	if (pipe(node->command->out_fd) < 0)//outfdが外とつなぐ
+		fatal_error("pipe");
+	cpy_pipe(node->next->command->in_fd, node->command->out_fd);
+}
+
+void	prepare_pipe_child(t_node *node)
+{
+	close(node->command->out_fd[0]);
+	dup2(node->command->in_fd[0], STDIN_FILENO);
+	if (node->command->in_fd[0] != STDIN_FILENO)
+		close(node->command->in_fd[0]);
+	dup2(node->command->out_fd[1], STDOUT_FILENO);
+	if (node->command->out_fd[1] != STDOUT_FILENO)
+		close(node->command->out_fd[1]);
+}
+
+void	prepare_pipe_parent(t_node *node)
+{
+	if (node->command->in_fd[0] != STDIN_FILENO)
+		close(node->command->in_fd[0]); //前の出力を持ってくる
+	if (node->next != NULL) //次がnullなら別にpipeでつなぐ必要はない
+		close(node->command->out_fd[1]);
+}
+
+pid_t exec_pipeline(t_node *node)
+{
+    extern char **environ;
+    char        *path;
+    pid_t       pid;
+    char        **argv;
+
+    if (node == NULL)
+        return (-1);
+    prepare_pipe(node);
     pid = fork();
     if (pid < 0)
-        fatal_error("fork");
-    else if (pid == 0)
+		fatal_error("fork");
+    else if (pid == 0)//childprocess
     {
-        redirect_reconect(command);
-	    argv = args_to_argv(command->args); 
-        command_name = argv[0];
-        execve(searchpath(command_name), argv, environ);
-        fatal_error("execve\n");
-        return (1);
+        prepare_pipe_child(node);
+        redirect_reconect(node->command);
+        argv = args_to_argv(node->command->args);
+        path = argv[0];
+        execve(searchpath(path), argv, environ);
+        fatal_error("excve");
     }
-    else
-    {
-        wait(&wstatus);
-        return (WEXITSTATUS(wstatus));
-    }
-    return (0);
+    prepare_pipe_parent(node);//ここから親プロセス    
+    if (node->next)
+        return (exec_pipeline(node->next));
+    return (pid);
 }
+
+int wait_pipeline(pid_t last_pid)
+{
+    pid_t   wait_result;
+    int     status;
+    int     wstatus;
+
+    while (1)
+    {
+        wait_result = wait(&wstatus);
+        if (wait_result == last_pid)
+            status = WEXITSTATUS(wstatus);
+        else if (wait_result < 0)
+        {
+            if (errno == ECHILD)
+                break;
+        }
+    }
+    return (status);
+}
+
+int exec(t_node *node)
+{
+    pid_t   last_pid;
+    int     status;
+
+    ready_redirectionfile(node);
+    last_pid = exec_pipeline(node);
+    status = wait_pipeline(last_pid);
+    return (status);
+}
+
+// int    exec(t_command *command)
+// {
+//     t_redirect *f_redirect;
+//     pid_t pid;
+//     int wstatus;
+//     char **argv;
+//     char *command_name;
+//     extern char **environ;
+
+//     f_redirect = *(command->redirect);
+//     ready_redirectionfile(*(command->redirect));
+//     *(command->redirect) = f_redirect;
+//     pid = fork();
+//     if (pid < 0)
+//         fatal_error("fork");
+//     else if (pid == 0)
+//     {
+//         redirect_reconect(command);
+// 	    argv = args_to_argv(command->args); 
+//         command_name = argv[0];
+//         execve(searchpath(command_name), argv, environ);
+//         fatal_error("execve\n");
+//         return (1);
+//     }
+//     else
+//     {
+//         wait(&wstatus);
+//         return (WEXITSTATUS(wstatus));
+//     }
+//     return (0);
+// }
 
 
 char    **args_to_argv(t_token *args)

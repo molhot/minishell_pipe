@@ -11,7 +11,8 @@ int main()
 {
 	char	  *line;
 	t_token	*tok;
-  t_node  *node;
+  	t_node  *node;
+	//t_node	*fnode;
 
 	rl_outstream = stderr;
 	while (1)
@@ -28,9 +29,8 @@ int main()
 			tok = tokenizer(line);
 			expand(tok);
 			node = parse(tok);
-			node->command->now_in = STDIN_FILENO;
-			node->command->now_out = STDOUT_FILENO;
-			exec(node->command);
+			exec(node);
+			//exec_pipeline(node);
 			if (tok != NULL)
 				free_token(tok);
 		}

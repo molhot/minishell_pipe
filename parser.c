@@ -65,11 +65,17 @@ void	parse_word(t_token **args, t_token *tok)
 t_node	*parse(t_token *tok)
 {
 	t_node		*node;
+	t_node		*fnode;
 	t_redirect	*redirection_node;
 	bool		first_action;
 
 	node = new_node(ND_SIMPLE_CMD);
+	fnode = node;
 	node->command->redirect = (t_redirect **)malloc(sizeof(t_redirect *) * 1);
+	node->command->in_fd[0] = STDIN_FILENO;
+	node->command->in_fd[1] = -1;
+	node->command->out_fd[0] = -1;
+	node->command->out_fd[1] = STDOUT_FILENO;
 	first_action = true;
 	while (tok && !at_eof(tok))
 	{
@@ -95,6 +101,20 @@ t_node	*parse(t_token *tok)
 			}
 			tok = tok->next->next;
 		}
+		else if (tok->kind == TK_OP)
+		{
+			if (first_action == true)
+				(*(node->command->redirect)) = NULL;
+			node->next = new_node(ND_SIMPLE_CMD);
+			node = node->next;
+			node->command->in_fd[0] = STDIN_FILENO;
+			node->command->in_fd[1] = -1;
+			node->command->out_fd[0] = -1;
+			node->command->out_fd[1] = STDOUT_FILENO;
+			node->command->redirect = (t_redirect **)malloc(sizeof(t_redirect *) * 1);
+			first_action = true;
+			tok = tok->next;
+		}
 		else
 			fatal_error("Implement parser");
 	}
@@ -103,7 +123,7 @@ t_node	*parse(t_token *tok)
 	else
 		redirection_node->next = NULL;
 	node->next = NULL;
-	return (node);
+	return (fnode);
 }
 
 /*************** 追加したパース用の関数 ****************/
