@@ -29,15 +29,10 @@ int main()
 			tok = tokenizer(line);
 			expand(tok);
 			node = parse(tok);
-			while (node != NULL)
-			{
-				printf("%s\n", (node->command->args)[0]);
-				node = node->next;
-			}
-			// exec(node);
-			// //exec_pipeline(node);
-			// if (tok != NULL)
-			// 	free_token(tok);
+			exec(node);
+			//exec_pipeline(node);
+			if (tok != NULL)
+				free_token(tok);
 		}
 		free(line);
 	}
